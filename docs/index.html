@@ -80,12 +80,8 @@
 
 <div id="menuScreen" class="overlay hidden">
   <h1>SARI KORİDOR</h1>
-  <div class="sub">SONSUZ ODALAR</div>
-  <p>Sonsuza kadar tekrar eden sarı odalardasın. Haritanın bir yerlerinde
-  <b>3 anahtar</b> ve duvarlarda onlara ait <b>3 kilit deliği</b> var.
-  Üç anahtarı da deliklere yerleştirirsen bu yerden kurtulursun.
-  Ama yalnız değilsin &mdash; karanlıkta seni izleyen bir şey var.
-  Yerlerde bulacağın garip cihaz, onu birkaç saniyeliğine sersemletebilir.</p>
+  <div class="sub" id="subTitle">SONSUZ ODALAR</div>
+  <p id="introText"></p>
   <div class="keys">WASD — Hareket (koşarak) &nbsp;|&nbsp; FARE — Bak</div>
   <div class="keys">E — Al / Etkileşim &nbsp;|&nbsp; F — Sersemletici Aleti Kullan</div>
   <div class="keys">(Klavye + fare olan bir bilgisayarda oynanması önerilir)</div>
@@ -100,10 +96,19 @@
 </div>
 
 <div id="winScreen" class="overlay hidden">
-  <h1>KAZANDINIZ!</h1>
-  <div class="sub">ÇIKIŞI BULDUN</div>
+  <h1 id="winTitle">KAZANDINIZ!</h1>
+  <div class="sub" id="winSub">ÇIKIŞI BULDUN</div>
   <p id="winTime" style="font-size:20px;letter-spacing:2px;"></p>
   <button class="btn" id="retryBtnWin">YENİDEN OYNA</button>
+</div>
+
+<div id="levelUpScreen" class="overlay hidden">
+  <h1 style="color:#bfe9b0;text-shadow:0 0 20px rgba(120,220,90,0.5);">BÖLÜM 1 TAMAMLANDI</h1>
+  <div class="sub">ÇIKIŞI BULDUN</div>
+  <p id="levelUpTime" style="font-size:18px;letter-spacing:2px;margin-bottom:10px;"></p>
+  <p style="max-width:520px;">Ama bu daha başlangıçtı. 2. bölüm daha büyük, daha karanlık
+  ve bu sefer yalnız değilsin — <b>iki canavar</b> aynı anda peşinde olacak.</p>
+  <button class="btn" id="nextLevelBtn" style="border-color:#8fc47a;color:#ddf0cc;">BÖLÜM 2'YE GEÇ</button>
 </div>
 
 <div id="gameUI" class="hidden">
@@ -113,7 +118,7 @@
   <div id="hud">
     <div>
       <div class="stat big" id="timerDisplay">00:00</div>
-      <div class="stat">SÜRE</div>
+      <div class="stat">SÜRE &nbsp;•&nbsp; <span id="levelBadge">BÖLÜM 1</span></div>
     </div>
     <div class="right">
       <div class="stat big" id="keyCount">🔑 0 / 3</div>
@@ -129,16 +134,29 @@
 "use strict";
 
 /* ============================================================
+   BOLUM SISTEMI
+============================================================ */
+let LEVEL = 1;
+try{ LEVEL = parseInt(sessionStorage.getItem('sariKoridorLevel')||'1',10); }catch(e){}
+if(LEVEL!==1 && LEVEL!==2 && LEVEL!==3) LEVEL = 1;
+const LEVEL_CFG = {
+  1: { grid:13, monsterCount:1, chaseSpeed:6.6, keyCount:3, stunCount:5, fogDensity:0.052, lightBudget:6 },
+  2: { grid:17, monsterCount:2, chaseSpeed:7.6, keyCount:4, stunCount:4, fogDensity:0.064, lightBudget:5 },
+  3: { grid:20, monsterCount:3, chaseSpeed:8.4, keyCount:5, stunCount:3, fogDensity:0.075, lightBudget:4 }
+};
+const CFG = LEVEL_CFG[LEVEL];
+
+/* ============================================================
    AYARLAR
 ============================================================ */
-const GRID        = 13;          // haritanın hücre sayısı (NxN)
+const GRID        = CFG.grid;    // haritanın hücre sayısı (NxN) - bolume gore degisir
 const CELL        = 8.6;         // her hücrenin metre cinsinden boyutu - genis oda/koridor hissi
 const WALL_H      = 3.4;
 const WALL_T      = 0.28;
 const EYE_H       = 1.65;
 const PLAYER_R    = 0.38;
 const PLAYER_SPEED= 11.5;        // karakter her zaman bu hizda kosar - Shift yok
-const MONSTER_CHASE_SPEED = 6.6;
+const MONSTER_CHASE_SPEED = CFG.chaseSpeed;
 const MONSTER_WANDER_SPEED = 2.6;
 const CATCH_DIST  = 1.1;
 const STUN_RANGE  = 7.5;
@@ -176,7 +194,7 @@ let gameState = 'loading'; // loading, menu, playing, won, lost
 ============================================================ */
 const scene = new THREE.Scene();
 const fogColor = 0x3a3520;
-scene.fog = new THREE.FogExp2(fogColor, 0.052);
+scene.fog = new THREE.FogExp2(fogColor, CFG.fogDensity);
 scene.background = new THREE.Color(fogColor);
 
 const camera = new THREE.PerspectiveCamera(72, window.innerWidth/window.innerHeight, 0.05, 120);
@@ -531,7 +549,7 @@ fixtureSpots.forEach((c, idx)=>{
 });
 scene.add(fixtureMesh);
 
-let realLightBudget = 6; // keep real-time lights low - each one is costly for every pixel on screen
+let realLightBudget = CFG.lightBudget; // keep real-time lights low - each one is costly for every pixel on screen
 const shuffledSpots = fixtureSpots.slice().sort(()=>Math.random()-0.5);
 for(const c of shuffledSpots){
   if(realLightBudget<=0) break;
@@ -576,11 +594,11 @@ function pickSpreadCells(count, minCellDist, excludeSet, filterFn){
 function hasWallSide(i,j){ const c=maze[i][j]; return c.N||c.S||c.E||c.W; }
 
 const usedCells = new Set();
-const keyCells  = pickSpreadCells(3, Math.max(3,Math.floor(GRID/3)), usedCells);
+const keyCells  = pickSpreadCells(CFG.keyCount, Math.max(3,Math.floor(GRID/3)), usedCells);
 keyCells.forEach(c=>usedCells.add(c[0]+','+c[1]));
-const holeCells = pickSpreadCells(3, Math.max(3,Math.floor(GRID/3)), usedCells, hasWallSide);
+const holeCells = pickSpreadCells(CFG.keyCount, Math.max(3,Math.floor(GRID/3)), usedCells, hasWallSide);
 holeCells.forEach(c=>usedCells.add(c[0]+','+c[1]));
-const itemCells = pickSpreadCells(5, Math.max(2,Math.floor(GRID/4)), usedCells);
+const itemCells = pickSpreadCells(CFG.stunCount, Math.max(2,Math.floor(GRID/4)), usedCells);
 
 function findWallForHole(i,j){
   const c = maze[i][j];
@@ -808,130 +826,118 @@ function buildMonster(){
   return group;
 }
 
-const monsterMesh = buildMonster();
-scene.add(monsterMesh);
-
-const blobShadow = new THREE.Mesh(
-  new THREE.CircleGeometry(0.55,16),
-  new THREE.MeshBasicMaterial({color:0x000000, transparent:true, opacity:0.45})
-);
-blobShadow.rotation.x = -Math.PI/2;
-blobShadow.position.y = 0.02;
-scene.add(blobShadow);
-
-const farCell = (()=>{
-  let best=[GRID-1,GRID-1], bd=-1;
-  for(let i=0;i<GRID;i++)for(let j=0;j<GRID;j++) if(distFromStart[i][j]>bd){ bd=distFromStart[i][j]; best=[i,j]; }
-  return best;
-})();
-
-const monster = {
-  cell: [farCell[0], farCell[1]],
-  pos: cellCenter(farCell[0], farCell[1]).clone(),
-  path: [],
-  mode: 'wander',
-  memory: 0,
-  repathTimer: 0,
-  stunnedTime: 0,
-  walkPhase: 0,
-  speed: MONSTER_WANDER_SPEED,
-  facing: 0
-};
-
-function pickWanderTarget(){
-  let tries=0;
-  // most of the time patrol locally, but sometimes drift roughly toward the
-  // player's area so it doesn't just vanish into a far corner of the map
-  const headTowardPlayer = Math.random() < 0.4;
-  while(tries<20){
-    tries++;
-    let i,j;
-    if(headTowardPlayer){
-      const pi = clamp(Math.floor(player.pos.x/CELL + GRID/2), 0, GRID-1);
-      const pj = clamp(Math.floor(player.pos.z/CELL + GRID/2), 0, GRID-1);
-      i = clamp(pi + (((Math.random()*7)|0)-3), 0, GRID-1);
-      j = clamp(pj + (((Math.random()*7)|0)-3), 0, GRID-1);
-    } else {
-      i = clamp(monster.cell[0] + (((Math.random()*9)|0)-4), 0, GRID-1);
-      j = clamp(monster.cell[1] + (((Math.random()*9)|0)-4), 0, GRID-1);
-    }
-    if(distFromStart[i][j]>=0){
-      const p = bfsPath(monster.cell[0], monster.cell[1], i, j);
-      if(p && p.length>1) return p;
-    }
+function pickMonsterSpawns(count){
+  const candidates = [];
+  for(let i=0;i<GRID;i++)for(let j=0;j<GRID;j++) if(distFromStart[i][j]>=0) candidates.push([i,j,distFromStart[i][j]]);
+  candidates.sort((a,b)=>b[2]-a[2]); // farthest from the player's start first
+  const chosen = [];
+  for(const c of candidates){
+    if(chosen.length>=count) break;
+    let ok = true;
+    for(const ch of chosen){ if(Math.abs(ch[0]-c[0])+Math.abs(ch[1]-c[1]) < Math.floor(GRID/2)) { ok=false; break; } }
+    if(ok) chosen.push(c);
   }
-  return [];
+  let idx=0;
+  while(chosen.length<count && idx<candidates.length){
+    if(!chosen.includes(candidates[idx])) chosen.push(candidates[idx]);
+    idx++;
+  }
+  return chosen;
 }
 
-function updateMonster(dt){
-  if(monster.stunnedTime>0){
-    monster.stunnedTime -= dt;
-    monsterMesh.userData.spine.rotation.x = Math.min(1.3, (STUN_TIME-monster.stunnedTime)*1.4);
-    monsterMesh.position.set(monster.pos.x,0,monster.pos.z);
-    blobShadow.position.set(monster.pos.x,0.02,monster.pos.z);
+function createMonster(spawnCell){
+  const mesh = buildMonster();
+  scene.add(mesh);
+  const blob = new THREE.Mesh(
+    new THREE.CircleGeometry(0.55,16),
+    new THREE.MeshBasicMaterial({color:0x000000, transparent:true, opacity:0.45})
+  );
+  blob.rotation.x = -Math.PI/2;
+  blob.position.y = 0.02;
+  scene.add(blob);
+  return {
+    mesh, blob,
+    cell: [spawnCell[0], spawnCell[1]],
+    pos: cellCenter(spawnCell[0], spawnCell[1]).clone(),
+    path: [],
+    repathTimer: Math.random()*0.3,
+    stunnedTime: 0,
+    walkPhase: Math.random()*10,
+    speed: MONSTER_CHASE_SPEED,
+    facing: 0
+  };
+}
+
+const monsterSpawns = pickMonsterSpawns(CFG.monsterCount);
+const monsters = monsterSpawns.map(createMonster);
+
+function updateMonster(m, dt){
+  if(m.stunnedTime>0){
+    m.stunnedTime -= dt;
+    m.mesh.userData.spine.rotation.x = Math.min(1.3, (STUN_TIME-m.stunnedTime)*1.4);
+    m.mesh.position.set(m.pos.x,0,m.pos.z);
+    m.blob.position.set(m.pos.x,0.02,m.pos.z);
     return;
-  } else if(monsterMesh.userData.spine.rotation.x>0.01){
-    monsterMesh.userData.spine.rotation.x *= 0.88;
+  } else if(m.mesh.userData.spine.rotation.x>0.01){
+    m.mesh.userData.spine.rotation.x *= 0.88;
   }
 
-  const dPlayer = Math.hypot(monster.pos.x-player.pos.x, monster.pos.z-player.pos.z);
+  const dPlayer = Math.hypot(m.pos.x-player.pos.x, m.pos.z-player.pos.z);
 
   // her zaman kovalar - haritada nerede oldugunu her an biliyor
-  monster.mode = 'chase';
-
-  monster.repathTimer -= dt;
-  if(monster.repathTimer<=0){
-    monster.repathTimer = 0.3;
+  m.repathTimer -= dt;
+  if(m.repathTimer<=0){
+    m.repathTimer = 0.3;
     const pi = clamp(Math.floor(player.pos.x/CELL + GRID/2), 0, GRID-1);
     const pj = clamp(Math.floor(player.pos.z/CELL + GRID/2), 0, GRID-1);
-    const p = bfsPath(monster.cell[0], monster.cell[1], pi, pj);
-    if(p) monster.path = p;
+    const p = bfsPath(m.cell[0], m.cell[1], pi, pj);
+    if(p) m.path = p;
   }
 
-  monster.speed = MONSTER_CHASE_SPEED;
+  m.speed = MONSTER_CHASE_SPEED;
 
-  if(monster.path.length>0){
-    const cellXY = monster.path[0];
+  if(m.path.length>0){
+    const cellXY = m.path[0];
     const target = cellCenter(cellXY[0], cellXY[1]);
-    const dx = target.x-monster.pos.x, dz = target.z-monster.pos.z;
+    const dx = target.x-m.pos.x, dz = target.z-m.pos.z;
     const d = Math.hypot(dx,dz);
     if(d < 0.15){
-      monster.cell = [cellXY[0], cellXY[1]];
-      monster.path.shift();
+      m.cell = [cellXY[0], cellXY[1]];
+      m.path.shift();
     } else {
-      monster.pos.x += (dx/d)*monster.speed*dt;
-      monster.pos.z += (dz/d)*monster.speed*dt;
-      monster.facing = Math.atan2(dx,dz);
+      m.pos.x += (dx/d)*m.speed*dt;
+      m.pos.z += (dz/d)*m.speed*dt;
+      m.facing = Math.atan2(dx,dz);
     }
   } else {
     // no multi-cell path needed (most often: monster and player are already in the
     // same room) - close the last stretch by heading straight at the player so it
     // never just stands there when you're hiding in a corner of its own cell
-    const dx = player.pos.x-monster.pos.x, dz = player.pos.z-monster.pos.z;
+    const dx = player.pos.x-m.pos.x, dz = player.pos.z-m.pos.z;
     const d = Math.hypot(dx,dz);
     if(d > 0.05){
-      monster.pos.x += (dx/d)*monster.speed*dt;
-      monster.pos.z += (dz/d)*monster.speed*dt;
-      monster.facing = Math.atan2(dx,dz);
+      m.pos.x += (dx/d)*m.speed*dt;
+      m.pos.z += (dz/d)*m.speed*dt;
+      m.facing = Math.atan2(dx,dz);
     }
   }
 
-  monster.walkPhase += dt * 9;
-  const u = monsterMesh.userData;
-  const swing = Math.sin(monster.walkPhase);
+  m.walkPhase += dt * 9;
+  const u = m.mesh.userData;
+  const swing = Math.sin(m.walkPhase);
   u.legL.root.rotation.x = swing*0.6;
   u.legR.root.rotation.x = -swing*0.6;
-  u.armL.root.rotation.x = -swing*0.5 + (monster.mode==='chase'?-0.6:0);
-  u.armR.root.rotation.x = swing*0.5 + (monster.mode==='chase'?-0.6:0);
-  const jitter = (Math.sin(monster.walkPhase*13.1)+Math.sin(monster.walkPhase*7.7))*0.045;
+  u.armL.root.rotation.x = -swing*0.5 - 0.6;
+  u.armR.root.rotation.x = swing*0.5 - 0.6;
+  const jitter = (Math.sin(m.walkPhase*13.1)+Math.sin(m.walkPhase*7.7))*0.045;
   u.spine.rotation.z = jitter;
-  u.head.rotation.y = Math.sin(monster.walkPhase*0.5)*0.3 + jitter*2;
+  u.head.rotation.y = Math.sin(m.walkPhase*0.5)*0.3 + jitter*2;
 
-  monsterMesh.rotation.y = monster.facing;
-  monsterMesh.position.set(monster.pos.x, 0, monster.pos.z);
-  blobShadow.position.set(monster.pos.x, 0.02, monster.pos.z);
+  m.mesh.rotation.y = m.facing;
+  m.mesh.position.set(m.pos.x, 0, m.pos.z);
+  m.blob.position.set(m.pos.x, 0.02, m.pos.z);
 
-  if(dPlayer < CATCH_DIST) startJumpscare();
+  if(dPlayer < CATCH_DIST) startJumpscare(m);
 }
 
 /* ============================================================
@@ -1022,18 +1028,26 @@ function tryInteract(){
       it.mesh.userData.socketMat.emissive = new THREE.Color(0x224411);
       filledHoles++;
       updateHUD();
-      if(filledHoles>=3) triggerWin();
+      if(filledHoles>=CFG.keyCount) onLevelHolesFilled();
     }
   }
 }
+function nearestMonsterDist(){
+  let best = Infinity;
+  for(const m of monsters){
+    const d = Math.hypot(m.pos.x-player.pos.x, m.pos.z-player.pos.z);
+    if(d<best) best = d;
+  }
+  return best;
+}
 function tryUseStun(){
   if(stunItems<=0) return;
-  const d = Math.hypot(monster.pos.x-player.pos.x, monster.pos.z-player.pos.z);
-  if(d < STUN_RANGE){
-    stunItems--;
-    monster.stunnedTime = STUN_TIME;
-    updateHUD();
+  let used = false;
+  for(const m of monsters){
+    const d = Math.hypot(m.pos.x-player.pos.x, m.pos.z-player.pos.z);
+    if(d < STUN_RANGE){ m.stunnedTime = STUN_TIME; used = true; }
   }
+  if(used){ stunItems--; updateHUD(); }
 }
 function updatePrompt(){
   const it = nearestInteractable();
@@ -1042,7 +1056,7 @@ function updatePrompt(){
     else if(it.type==='stun') promptEl.textContent='E - Sersemletici Aleti Al';
     else if(it.type==='hole') promptEl.textContent = heldKeys>0 ? 'E - Anahtari Yerlestir' : 'Bunun icin bir anahtarin yok';
     promptEl.style.display='block';
-  } else if(stunItems>0 && Math.hypot(monster.pos.x-player.pos.x, monster.pos.z-player.pos.z) < STUN_RANGE){
+  } else if(stunItems>0 && nearestMonsterDist() < STUN_RANGE){
     promptEl.textContent = 'F - Sersemletici Aleti Kullan!';
     promptEl.style.display='block';
   } else {
@@ -1063,7 +1077,7 @@ function updateItemsAnim(t){
   }
 }
 function updateHUD(){
-  keyCountEl.textContent = filledHoles + ' / 3 kilit \u{1F511}';
+  keyCountEl.textContent = filledHoles + ' / ' + CFG.keyCount + ' kilit \u{1F511}';
   itemCountEl.textContent = 'Elde: ' + heldKeys + ' anahtar | Alet: ' + stunItems + ' \u26A1';
 }
 
@@ -1128,7 +1142,7 @@ function jumpscareSound(){
   sub.start(now); sub.stop(now+0.4);
 }
 function updateHeartbeat(dPlayer, dt){
-  const near = monster.mode==='chase' && dPlayer<MONSTER_SIGHT_RANGE;
+  const near = dPlayer<MONSTER_SIGHT_RANGE;
   if(near){
     const period = clamp(dPlayer/MONSTER_SIGHT_RANGE,0.18,1)*0.75+0.18; // seconds
     heartbeatCountdown -= dt;
@@ -1164,11 +1178,25 @@ function formatTime(s){
   return String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
 }
 let finished=false, elapsed=0;
+function onLevelHolesFilled(){
+  if(LEVEL < 2){
+    if(finished) return; finished=true;
+    gameState='won';
+    if(document.exitPointerLock) document.exitPointerLock();
+    document.getElementById('levelUpTime').textContent = 'Bölüm süren: ' + formatTime(elapsed);
+    gameUI.classList.add('hidden');
+    document.getElementById('levelUpScreen').classList.remove('hidden');
+  } else {
+    triggerWin();
+  }
+}
 function triggerWin(){
   if(finished) return; finished=true;
   gameState='won';
   if(document.exitPointerLock) document.exitPointerLock();
-  document.getElementById('winTime').textContent = 'Suren: ' + formatTime(elapsed);
+  document.getElementById('winTitle').textContent = 'KAZANDINIZ!';
+  document.getElementById('winSub').textContent = 'HER İKİ BÖLÜMÜ DE TAMAMLADIN';
+  document.getElementById('winTime').textContent = 'Toplam süren: ' + formatTime(elapsed);
   gameUI.classList.add('hidden');
   winScreen.classList.remove('hidden');
 }
@@ -1183,15 +1211,17 @@ function triggerLose(){
 }
 
 let jumpscareT = -1;
-function startJumpscare(){
+let jumpscareMonster = null;
+function startJumpscare(m){
   if(jumpscareT>=0 || gameState!=='playing') return;
   jumpscareT = 0;
+  jumpscareMonster = m;
   gameState = 'jumpscare';
   // snap it to look you dead in the eye the instant it catches you, regardless of
   // which way it happened to be facing while pathing a moment earlier
-  const fdx = player.pos.x-monster.pos.x, fdz = player.pos.z-monster.pos.z;
-  monster.facing = Math.atan2(fdx,fdz);
-  monsterMesh.rotation.y = monster.facing;
+  const fdx = player.pos.x-m.pos.x, fdz = player.pos.z-m.pos.z;
+  m.facing = Math.atan2(fdx,fdz);
+  m.mesh.rotation.y = m.facing;
   promptEl.style.display = 'none';
   document.getElementById('hud').style.display = 'none';
   document.getElementById('crosshair').style.display = 'none';
@@ -1205,12 +1235,13 @@ const __headWorldPos = new THREE.Vector3();
 const __camShakeTarget = new THREE.Vector3();
 function updateJumpscare(dt){
   jumpscareT += dt;
-  monsterMesh.userData.head.getWorldPosition(__headWorldPos);
+  const jm = jumpscareMonster;
+  jm.mesh.userData.head.getWorldPosition(__headWorldPos);
 
   // whip the camera right up into the creature's face, closer than before -
   // the offset is relative to the direction the face actually points, not a
   // fixed world axis, so you always end up looking straight at it
-  const faceFwd = { x: Math.sin(monsterMesh.rotation.y), z: Math.cos(monsterMesh.rotation.y) };
+  const faceFwd = { x: Math.sin(jm.mesh.rotation.y), z: Math.cos(jm.mesh.rotation.y) };
   const zoomT = Math.min(1, jumpscareT/0.15);
   const ease = 1-Math.pow(1-zoomT,3);
   __camShakeTarget.set(__headWorldPos.x+faceFwd.x*0.32, __headWorldPos.y+0.02, __headWorldPos.z+faceFwd.z*0.32);
@@ -1223,9 +1254,9 @@ function updateJumpscare(dt){
 
   // the grin cracks open even wider
   const jawOpen = Math.min(1, jumpscareT/0.5);
-  monsterMesh.userData.jaw.scale.y = 1 + jawOpen*2.4;
-  monsterMesh.userData.jaw.scale.x = 1 + jawOpen*0.25;
-  monsterMesh.userData.jaw.position.y = 0.63 - jawOpen*0.05;
+  jm.mesh.userData.jaw.scale.y = 1 + jawOpen*2.4;
+  jm.mesh.userData.jaw.scale.x = 1 + jawOpen*0.25;
+  jm.mesh.userData.jaw.position.y = 0.63 - jawOpen*0.05;
 
   if(jumpscareT < 0.06){
     // a single blinding white pop right at the instant of contact
@@ -1236,7 +1267,7 @@ function updateJumpscare(dt){
     dangerFlash.style.background = strobe ? 'rgba(40,255,140,0.45)' : 'rgba(0,0,0,0.35)';
   }
   const eyeGlow = 2.8 + Math.random()*4.5;
-  monsterMesh.traverse(o=>{ if(o.material && o.material.emissive && o.material.emissiveIntensity>1) o.material.emissiveIntensity = eyeGlow; });
+  jm.mesh.traverse(o=>{ if(o.material && o.material.emissive && o.material.emissiveIntensity>1) o.material.emissiveIntensity = eyeGlow; });
 
   if(jumpscareT >= JUMPSCARE_DURATION) triggerLose();
 }
@@ -1250,10 +1281,10 @@ function animate(){
   if(gameState==='playing'){
     elapsed += dt;
     updatePlayer(dt);
-    updateMonster(dt);
+    for(const m of monsters) updateMonster(m, dt);
     updateItemsAnim(t);
     updatePrompt();
-    const dPlayer = Math.hypot(monster.pos.x-player.pos.x, monster.pos.z-player.pos.z);
+    const dPlayer = nearestMonsterDist();
     updateHeartbeat(dPlayer, dt);
     playerLight.intensity = 0.85 + Math.sin(t*7)*0.05;
     timerDisplay.textContent = formatTime(elapsed);
@@ -1271,8 +1302,15 @@ document.getElementById('startBtn').addEventListener('click', ()=>{
   gameState='playing';
   requestLockSafe();
 });
-document.getElementById('retryBtnLose').addEventListener('click', ()=>location.reload());
-document.getElementById('retryBtnWin').addEventListener('click', ()=>location.reload());
+document.getElementById('retryBtnLose').addEventListener('click', ()=>{ try{sessionStorage.removeItem('sariKoridorLevel');}catch(e){} location.reload(); });
+document.getElementById('retryBtnWin').addEventListener('click', ()=>{ try{sessionStorage.removeItem('sariKoridorLevel');}catch(e){} location.reload(); });
+document.getElementById('nextLevelBtn').addEventListener('click', ()=>{ try{sessionStorage.setItem('sariKoridorLevel','2');}catch(e){} location.reload(); });
+
+document.getElementById('levelBadge').textContent = 'BÖLÜM ' + LEVEL;
+document.getElementById('subTitle').textContent = LEVEL===2 ? 'BÖLÜM 2 — ÇOK DAHA ZOR' : 'SONSUZ ODALAR';
+document.getElementById('introText').innerHTML = CFG.monsterCount>1
+  ? `Bu sefer yalnız değilsin: <b>${CFG.keyCount} anahtar</b> ve <b>${CFG.keyCount} kilit deliği</b> daha büyük bir haritaya dağılmış durumda, ve peşinde aynı anda <b>iki canavar</b> var. Yerlerde bulacağın garip cihaz onları birkaç saniyeliğine sersemletebilir.`
+  : `Sonsuza kadar tekrar eden sarı odalardasın. Haritanın bir yerlerinde <b>${CFG.keyCount} anahtar</b> ve duvarlarda onlara ait <b>${CFG.keyCount} kilit deliği</b> var. Hepsini deliklere yerleştirirsen bu yerden kurtulursun. Ama yalnız değilsin &mdash; karanlıkta seni izleyen bir şey var. Yerlerde bulacağın garip cihaz, onu birkaç saniyeliğine sersemletebilir.`;
 
 loadingEl.classList.add('hidden');
 menuScreen.classList.remove('hidden');
